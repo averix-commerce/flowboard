@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { ensureBoardProject, createRequest, getRequest, patchNode } from "../api/client";
-import { useBoardStore } from "./board";
+import { useBoardStore, type NodeStatus } from "./board";
 import { useSettingsStore } from "./settings";
 
 type PollEntry = { requestId: number; timerId: ReturnType<typeof setTimeout> | null };
@@ -715,6 +715,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
                 mediaIds,
                 aspectRatio,
                 renderedAt: new Date().toISOString(),
+                globalRefMediaIds: refMediaIds,
               },
             }).catch(() => {});
           }
@@ -820,11 +821,22 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     }
 
     const requestId = reqDto.id;
+    // Register in the active poll registry so cancelGeneration(rfId)
+    // (called on node deletion) actually stops the retry poll.
+    set((s) => ({
+      active: { ...s.active, [rfId]: { requestId, timerId: null } },
+    }));
+
     const poll = async () => {
+      // Implicit cancel: if the node was deleted, the active entry is gone.
+      if (get().active[rfId] === undefined) return;
       try {
         const req = await getRequest(requestId);
         if (req.status === "running" || req.status === "queued") {
-          setTimeout(poll, 1500);
+          const t = setTimeout(poll, 1500);
+          set((s) => ({
+            active: { ...s.active, [rfId]: { requestId, timerId: t } },
+          }));
           return;
         }
         if (req.status === "done") {
@@ -844,14 +856,21 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
                 }
               : s,
           );
-          // Aggregate node-level status from all shots.
-          const aggStatuses = new Set(updated.map((s) => s.status));
-          const aggregate: "done" | "error" | "partial" =
-            aggStatuses.size === 1 && aggStatuses.has("done")
-              ? "done"
-              : updated.some((s) => s.status === "done")
-                ? "partial"
-                : "error";
+          // Aggregate node-level status from all shots. "partial" is
+          // reserved for the genuine mixed-success-and-failure case;
+          // when other shots are still queued/running the node is
+          // still "running" overall.
+          const hasInProgress = updated.some(
+            (s) => s.status === "queued" || s.status === "running",
+          );
+          const aggregate: NodeStatus =
+            hasInProgress
+              ? "running"
+              : updated.every((s) => s.status === "done")
+                ? "done"
+                : updated.some((s) => s.status === "done")
+                  ? "partial"
+                  : "error";
           useBoardStore.getState().updateNodeData(rfId, {
             shots: updated,
             mediaIds: updated.map((s) => s.mediaId ?? null),
@@ -867,6 +886,11 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
               },
             }).catch(() => {});
           }
+          set((s) => {
+            const next = { ...s.active };
+            delete next[rfId];
+            return { active: next };
+          });
           return;
         }
         // failed
@@ -879,9 +903,16 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
             s.idx === shotIdx ? { ...s, status: "error", error: errMsg } : s,
           ),
         });
-        set({ error: errMsg });
+        set((s) => {
+          const next = { ...s.active };
+          delete next[rfId];
+          return { active: next, error: errMsg };
+        });
       } catch {
-        setTimeout(poll, 1500);
+        const t = setTimeout(poll, 1500);
+        set((s) => ({
+          active: { ...s.active, [rfId]: { requestId, timerId: t } },
+        }));
       }
     };
     setTimeout(poll, 800);
