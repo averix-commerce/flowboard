@@ -4990,6 +4990,30 @@ button:disabled {
   background: var(--panel-high);
   color: var(--muted);
 }
+.activity-row__cancel {
+  flex-shrink: 0;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.activity-row__cancel:hover {
+  background: rgba(255, 90, 90, 0.12);
+  border-color: rgba(255, 90, 90, 0.45);
+  color: #ff8888;
+}
+.activity-row__cancel:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
 
 /* Detail modal — full payload viewer */
 .activity-detail-backdrop {

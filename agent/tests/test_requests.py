@@ -53,6 +53,71 @@ def test_get_missing_request_returns_404(client):
     assert r.status_code == 404
 
 
+def test_cancel_queued_request_marks_failed_with_canceled_error(client):
+    r = client.post(
+        "/api/requests",
+        json={"type": "proxy", "params": {"url": "https://aisandbox-pa.googleapis.com/v1/ping"}},
+    ).json()
+    res = client.post(f"/api/requests/{r['id']}/cancel")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["status"] == "failed"
+    assert body["error"] == "canceled"
+    assert body["finished_at"] is not None
+
+
+def test_cancel_missing_request_returns_404(client):
+    res = client.post("/api/requests/9999/cancel")
+    assert res.status_code == 404
+
+
+def test_cancel_already_canceled_request_returns_409(client):
+    r = client.post(
+        "/api/requests",
+        json={"type": "proxy", "params": {}},
+    ).json()
+    first = client.post(f"/api/requests/{r['id']}/cancel")
+    assert first.status_code == 200
+    again = client.post(f"/api/requests/{r['id']}/cancel")
+    assert again.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_worker_skips_canceled_request(client):
+    """If the user cancels a queued row before the worker pops it,
+    the worker should not run the handler and not flip status away
+    from the canceled state."""
+    row = client.post(
+        "/api/requests",
+        json={"type": "proxy", "params": {"marker": "skip-me"}},
+    ).json()
+    # Cancel BEFORE enqueueing the rid so the row already reads
+    # status='failed' when the worker pops it.
+    canceled = client.post(f"/api/requests/{row['id']}/cancel").json()
+    assert canceled["status"] == "failed"
+
+    handler_calls: list[dict] = []
+
+    async def _spy_handler(params):
+        handler_calls.append(params)
+        return ({"echo": params}, None)
+
+    w = WorkerController(handlers={"proxy": _spy_handler})
+    task = asyncio.create_task(w.start())
+    try:
+        w.enqueue(row["id"])
+        # Give the worker a couple of ticks; if it were going to run,
+        # it would do so well under a second.
+        await asyncio.sleep(0.3)
+        assert handler_calls == []
+        current = client.get(f"/api/requests/{row['id']}").json()
+        assert current["status"] == "failed"
+        assert current["error"] == "canceled"
+    finally:
+        w.request_shutdown()
+        await asyncio.wait_for(task, timeout=2.0)
+
+
 # ── Worker tests ──────────────────────────────────────────────────────────────
 
 

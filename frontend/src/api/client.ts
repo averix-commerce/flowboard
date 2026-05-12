@@ -716,3 +716,14 @@ export async function getActivityDetail(id: number): Promise<ActivityDetail> {
   if (!res.ok) throw new Error(`getActivityDetail: ${res.status}`);
   return res.json();
 }
+
+// Cancel a queued request. The activity row id IS the underlying
+// Request.id, so the same numeric handle works against /api/requests.
+// Backend returns 409 when the row has already moved past queued.
+export async function cancelActivity(id: number): Promise<void> {
+  const res = await fetch(`/api/requests/${id}/cancel`, { method: "POST" });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`cancelActivity: ${res.status} ${detail}`);
+  }
+}

@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -44,4 +45,32 @@ def get_request(request_id: int):
         req = s.get(Request, request_id)
         if req is None:
             raise HTTPException(404, "request not found")
+        return req
+
+
+@router.post("/{request_id}/cancel")
+def cancel_request(request_id: int):
+    """Cancel a queued request before the worker picks it up.
+
+    Only ``queued`` rows are cancelable. The worker pulls rids off an
+    in-memory ``asyncio.Queue`` and we can't yank a value back out, so
+    we mark the row as ``failed`` with ``error='canceled'`` and let
+    ``_process_one`` skip rows whose DB status drifted away from
+    ``queued``. Returns 409 for any other state — running jobs need
+    different surgery (in-flight HTTP calls to Flow).
+    """
+    with get_session() as s:
+        req = s.get(Request, request_id)
+        if req is None:
+            raise HTTPException(404, "request not found")
+        if req.status != "queued":
+            raise HTTPException(
+                409, f"only queued requests can be canceled (status={req.status})"
+            )
+        req.status = "failed"
+        req.error = "canceled"
+        req.finished_at = datetime.now(timezone.utc)
+        s.add(req)
+        s.commit()
+        s.refresh(req)
         return req

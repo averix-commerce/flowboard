@@ -848,6 +848,16 @@ class WorkerController:
                 if req is None:
                     logger.warning("worker: request %s not found", rid)
                     return
+                # Drift guard — the row might have been canceled (or
+                # otherwise transitioned out of queued) between enqueue
+                # and pop. The cancel endpoint mutates the DB row only;
+                # it can't yank the rid back off the in-memory queue, so
+                # we re-check here and bail without flipping status.
+                if req.status != "queued":
+                    logger.info(
+                        "worker: skipping rid=%s (status=%s)", rid, req.status
+                    )
+                    return
                 handler = self._handlers.get(req.type)
                 if handler is None:
                     req.status = "failed"

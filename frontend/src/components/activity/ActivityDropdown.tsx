@@ -9,6 +9,7 @@ interface ActivityDropdownProps {
   onLoadMore(): void;
   onClose(): void;
   onSelect(id: number): void;
+  onCancel?(id: number): Promise<void>;
 }
 
 export function ActivityDropdown({
@@ -18,6 +19,7 @@ export function ActivityDropdown({
   onLoadMore,
   onClose,
   onSelect,
+  onCancel,
 }: ActivityDropdownProps) {
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -68,7 +70,12 @@ export function ActivityDropdown({
           </div>
         )}
         {items.map((item) => (
-          <ActivityRow key={item.id} item={item} onClick={() => onSelect(item.id)} />
+          <ActivityRow
+            key={item.id}
+            item={item}
+            onClick={() => onSelect(item.id)}
+            onCancel={onCancel}
+          />
         ))}
       </div>
 

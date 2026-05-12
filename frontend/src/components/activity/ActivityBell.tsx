@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
+import { cancelActivity } from "../../api/client";
 import { ActivityDropdown } from "./ActivityDropdown";
 import { ActivityDetailModal } from "./ActivityDetailModal";
 import { BellIcon } from "./ActivityIcon";
@@ -27,6 +28,20 @@ export function ActivityBell() {
     }
     setOpen((v) => !v);
   }
+
+  const onCancel = useCallback(
+    async (id: number) => {
+      try {
+        await cancelActivity(id);
+      } catch (e) {
+        // Swallow — refresh below will reveal the real state
+        // (e.g. 409 because the worker already promoted to running).
+        console.warn("cancel failed", e);
+      }
+      void feed.refresh();
+    },
+    [feed],
+  );
 
   // Display "9+" for >9 to keep the pill compact.
   const badgeLabel = feed.unreadCount > 9 ? "9+" : String(feed.unreadCount);
@@ -67,6 +82,7 @@ export function ActivityBell() {
             onLoadMore={feed.loadMore}
             onClose={() => setOpen(false)}
             onSelect={(id) => setDetailId(id)}
+            onCancel={onCancel}
           />
         )}
       </div>
