@@ -197,6 +197,10 @@ export function GenerationDialog() {
   const nodeCount = nodes.length;
   const edges = useBoardStore((s) => s.edges);
 
+  // Hooks MUST be called unconditionally on every render — pull
+  // videoModel out first, derive the boolean after.
+  const videoModelFamily = useSettingsStore((s) => s.videoModel);
+
   const targetType = node?.data.type ?? "image";
   const isVideo = targetType === "video";
   const isCharacter = targetType === "character";
@@ -205,8 +209,7 @@ export function GenerationDialog() {
   // takes ingredients (multi reference images), NOT a single i2v start
   // frame. So the dialog should show the same "Source references" chip
   // list that image targets use, and hide Veo's source-image selector.
-  const isOmniVideo =
-    isVideo && useSettingsStore((s) => s.videoModel) === "omni_flash";
+  const isOmniVideo = isVideo && videoModelFamily === "omni_flash";
   // Prompt nodes are text-only — clicking Generate runs auto_prompt
   // synthesis from upstream context and writes the result back to
   // node.data.prompt. No image dispatch, no aspect/variants.
@@ -1023,7 +1026,7 @@ export function GenerationDialog() {
             settings select the Omni model family. Replaces the implicit
             ~8s Veo duration with a per-dispatch radio. Credit cost is
             surfaced beside each option. */}
-        {isVideo && useSettingsStore.getState().videoModel === "omni_flash" && (
+        {isOmniVideo && (
           <div className="gen-dialog__field">
             <span className="gen-dialog__label">Duration (Omni Flash)</span>
             <div className="aspect-chip-row">
