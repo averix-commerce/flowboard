@@ -113,11 +113,103 @@ button:disabled {
   display: flex;
   gap: 6px;
   align-items: center;
+  flex: 1;
 }
 .project-sidebar__new:hover {
   color: var(--text);
   border-color: var(--accent);
   background: var(--panel);
+}
+
+.project-sidebar__row {
+  display: flex;
+  align-items: stretch;
+  margin: 8px 10px 4px;
+  gap: 6px;
+}
+.project-sidebar__row .project-sidebar__new {
+  margin: 0;
+}
+.project-sidebar__sync {
+  padding: 0 10px;
+  font-size: 13px;
+  background: var(--panel-high);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 80ms ease, color 80ms ease, border-color 80ms ease;
+}
+.project-sidebar__sync:hover:not(:disabled) {
+  color: #ffd54a;
+  border-color: var(--accent);
+}
+.project-sidebar__sync:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+.project-sidebar__sync-error {
+  margin: 0 10px 4px;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}
+
+.project-sidebar__orphan-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  font-size: 11px;
+  color: #ffd54a;
+}
+
+.project-sidebar__rebind-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.project-sidebar__rebind-row {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+}
+.project-sidebar__rebind-row:hover:not(:disabled) {
+  background: var(--panel-high);
+}
+.project-sidebar__rebind-row--current {
+  cursor: default;
+  opacity: 0.7;
+}
+.project-sidebar__rebind-title {
+  font-weight: 500;
+}
+.project-sidebar__rebind-current {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: normal;
+  margin-left: 4px;
+}
+.project-sidebar__rebind-id {
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.project-modal--rebind {
+  min-width: 380px;
+  max-width: 480px;
 }
 .project-sidebar__list {
   list-style: none;

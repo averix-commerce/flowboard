@@ -876,3 +876,42 @@ export async function deleteReference(id: number): Promise<void> {
     throw new Error(`deleteReference: ${res.status} ${res.statusText}`);
   }
 }
+
+// ── Flow project sync ──────────────────────────────────────────────────────
+
+export interface FlowRemoteProject {
+  project_id: string;
+  project_title: string;
+  thumbnail_media_key: string | null;
+  creation_time: string | null;
+}
+
+export interface BoardFlowStatus {
+  board_id: number;
+  board_name: string;
+  flow_project_id: string | null;
+  exists_on_flow: boolean;
+}
+
+export interface FlowProjectsResponse {
+  remote_projects: FlowRemoteProject[];
+  truncated: boolean;
+  board_status: BoardFlowStatus[];
+}
+
+export function listFlowProjects(): Promise<FlowProjectsResponse> {
+  return api<FlowProjectsResponse>("/api/flow/projects");
+}
+
+export function rebindBoardToFlowProject(
+  boardId: number,
+  flowProjectId: string,
+): Promise<{ board_id: number; flow_project_id: string }> {
+  return api<{ board_id: number; flow_project_id: string }>(
+    "/api/flow/projects/rebind",
+    {
+      method: "POST",
+      body: JSON.stringify({ board_id: boardId, flow_project_id: flowProjectId }),
+    },
+  );
+}

@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 FLOW_API_BASE = "https://aisandbox-pa.googleapis.com"
 TRPC_CREATE_PROJECT = "https://labs.google/fx/api/trpc/project.createProject"
+TRPC_SEARCH_PROJECTS = "https://labs.google/fx/api/trpc/project.searchUserProjects"
 VIDEO_I2V_URL = f"{FLOW_API_BASE}/v1/video:batchAsyncGenerateVideoStartImage"
 # Omni Flash uses a separate endpoint that takes referenceImages[] (multi-
 # ref, asset-typed) instead of a single startImage. Different request shape
@@ -310,6 +311,100 @@ class FlowSDK:
 
     def __init__(self, client: Optional[FlowClient] = None) -> None:
         self._client = client or flow_client
+
+    # ── project listing (TRPC search) ──────────────────────────────────────
+    async def search_user_projects(
+        self,
+        cursor: Optional[str] = None,
+        page_size: int = 20,
+        tool: str = "PINHOLE",
+    ) -> dict[str, Any]:
+        """Fetch one page of the user's Flow project list.
+
+        Returns ``{raw, projects, next_page_token}`` on success or
+        ``{raw, error}`` on failure. Each project is a dict with
+        ``project_id`` and ``project_title`` plus optional
+        ``thumbnail_media_key`` and ``creation_time``.
+        """
+        import json as _json
+        from urllib.parse import quote
+
+        input_json: dict[str, Any] = {
+            "json": {
+                "pageSize": page_size,
+                "toolName": tool,
+                "cursor": cursor,
+            },
+        }
+        # TRPC encodes the literal `undefined` cursor via meta on the
+        # first call. Subsequent calls pass a string cursor directly.
+        if cursor is None:
+            input_json["meta"] = {"values": {"cursor": ["undefined"]}}
+
+        url = (
+            f"{TRPC_SEARCH_PROJECTS}?input="
+            + quote(_json.dumps(input_json, separators=(",", ":")))
+        )
+        resp = await self._client.trpc_request(
+            url=url,
+            method="GET",
+            headers=_TRPC_HEADERS,
+            body=None,
+        )
+        if isinstance(resp, dict) and resp.get("error"):
+            return {"raw": resp, "error": resp["error"]}
+
+        # Response shape (per the canonical TRPC envelope):
+        #   data.result.data.json.result.{projects, nextPageToken}
+        try:
+            inner = resp["data"]["result"]["data"]["json"]["result"]
+        except (KeyError, TypeError):
+            return {"raw": resp, "error": "unexpected_search_response_shape"}
+
+        raw_projects = inner.get("projects") or []
+        projects: list[dict[str, Any]] = []
+        for p in raw_projects:
+            if not isinstance(p, dict):
+                continue
+            pid = p.get("projectId")
+            if not isinstance(pid, str) or not pid:
+                continue
+            info = p.get("projectInfo") if isinstance(p.get("projectInfo"), dict) else {}
+            projects.append({
+                "project_id": pid,
+                "project_title": info.get("projectTitle") or "Untitled",
+                "thumbnail_media_key": info.get("thumbnailMediaKey"),
+                "creation_time": p.get("creationTime"),
+            })
+        return {
+            "raw": resp,
+            "projects": projects,
+            "next_page_token": inner.get("nextPageToken"),
+        }
+
+    async def list_user_projects_all(
+        self, tool: str = "PINHOLE", max_pages: int = 10
+    ) -> dict[str, Any]:
+        """Paginate `search_user_projects` until exhausted (or max_pages).
+
+        Returns ``{projects, truncated}`` — truncated is True when we hit
+        the page cap with a non-null next_page_token still present.
+        """
+        all_projects: list[dict[str, Any]] = []
+        cursor: Optional[str] = None
+        for _ in range(max_pages):
+            page = await self.search_user_projects(cursor=cursor, tool=tool)
+            if page.get("error"):
+                return {
+                    "projects": all_projects,
+                    "truncated": True,
+                    "error": page["error"],
+                }
+            all_projects.extend(page.get("projects") or [])
+            cursor = page.get("next_page_token")
+            if not cursor:
+                return {"projects": all_projects, "truncated": False}
+        return {"projects": all_projects, "truncated": True}
 
     # ── project creation (TRPC) ────────────────────────────────────────────
     async def create_project(

@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useBoardStore } from "../store/board";
 import { AccountPanel } from "./AccountPanel";
+import {
+  listFlowProjects,
+  rebindBoardToFlowProject,
+  type BoardFlowStatus,
+  type FlowRemoteProject,
+} from "../api/client";
 
 /**
  * Left sidebar listing every local "project" (Board). Click an item to
@@ -27,6 +33,53 @@ export function ProjectSidebar() {
   const newDialogInputRef = useRef<HTMLInputElement>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+
+  // Flow project sync — keyed map { board_id → BoardFlowStatus } so each
+  // sidebar entry can render an orphan badge when its bound project no
+  // longer exists on Flow. Loaded on mount + on user click of the sync
+  // button. Remote-projects list is cached for the rebind picker.
+  const [flowStatus, setFlowStatus] = useState<Map<number, BoardFlowStatus>>(
+    () => new Map(),
+  );
+  const [remoteProjects, setRemoteProjects] = useState<FlowRemoteProject[]>([]);
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [rebindTarget, setRebindTarget] = useState<{
+    boardId: number;
+    boardName: string;
+  } | null>(null);
+
+  async function runFlowSync() {
+    if (syncing) return;
+    setSyncing(true);
+    setSyncError(null);
+    try {
+      const res = await listFlowProjects();
+      setRemoteProjects(res.remote_projects);
+      setFlowStatus(new Map(res.board_status.map((b) => [b.board_id, b])));
+    } catch (err) {
+      setSyncError(err instanceof Error ? err.message : "sync failed");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function handleRebind(boardId: number, flowProjectId: string) {
+    try {
+      await rebindBoardToFlowProject(boardId, flowProjectId);
+      setRebindTarget(null);
+      await runFlowSync();
+    } catch (err) {
+      setSyncError(err instanceof Error ? err.message : "rebind failed");
+    }
+  }
+
+  // First-mount sync — best-effort, silent on failure (extension might
+  // not be connected yet; user can hit the button to retry).
+  useEffect(() => {
+    runFlowSync().catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (renamingId !== null) {
@@ -154,17 +207,42 @@ export function ProjectSidebar() {
       </div>
       {!collapsed && (
         <>
-          <button
-            type="button"
-            className="project-sidebar__new"
-            onClick={handleNew}
-          >
-            <span aria-hidden="true">+</span> New project
-          </button>
+          <div className="project-sidebar__row">
+            <button
+              type="button"
+              className="project-sidebar__new"
+              onClick={handleNew}
+            >
+              <span aria-hidden="true">+</span> New project
+            </button>
+            <button
+              type="button"
+              className="project-sidebar__sync"
+              onClick={runFlowSync}
+              disabled={syncing}
+              title="Refresh Google Flow project list + check which boards are orphaned"
+              aria-label="Sync with Google Flow"
+            >
+              {syncing ? "…" : "🔄"}
+            </button>
+          </div>
+          {syncError && (
+            <div className="project-sidebar__sync-error" role="status">
+              Flow sync: {syncError}
+            </div>
+          )}
           <ul className="project-sidebar__list">
             {boards.map((b) => {
               const isActive = b.id === activeId;
               const isRenaming = b.id === renamingId;
+              const status = flowStatus.get(b.id);
+              // Orphan = bound flow_project_id is missing from Flow's
+              // remote list. We only flag once we've synced at least
+              // once (status is present); pre-sync state is "unknown".
+              const isOrphan =
+                status !== undefined
+                && status.flow_project_id !== null
+                && status.exists_on_flow === false;
               return (
                 <li
                   key={b.id}
@@ -188,9 +266,22 @@ export function ProjectSidebar() {
                         type="button"
                         className="project-sidebar__name"
                         onClick={() => switchBoard(b.id)}
-                        title={b.name}
+                        title={
+                          isOrphan
+                            ? `${b.name} — Flow project ${status?.flow_project_id ?? ""} không tồn tại trên Google Flow. Click ⋯ → Rebind to re-link.`
+                            : b.name
+                        }
                       >
                         {b.name || "Untitled"}
+                        {isOrphan && (
+                          <span
+                            className="project-sidebar__orphan-badge"
+                            title="Flow project not found — rebind required"
+                            aria-label="orphan"
+                          >
+                            ⚠
+                          </span>
+                        )}
                       </button>
                       <button
                         type="button"
@@ -209,6 +300,15 @@ export function ProjectSidebar() {
                             onClick={() => startRename(b.id, b.name)}
                           >
                             Rename
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpenMenuId(null);
+                              setRebindTarget({ boardId: b.id, boardName: b.name });
+                            }}
+                          >
+                            Rebind to Flow project…
                           </button>
                           <button
                             type="button"
@@ -332,6 +432,89 @@ export function ProjectSidebar() {
                 disabled={newDialogBusy}
               >
                 {newDialogBusy ? "Creating…" : "Create"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {rebindTarget && (
+        <div
+          className="project-modal-backdrop"
+          role="presentation"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setRebindTarget(null);
+          }}
+        >
+          <div
+            className="project-modal project-modal--rebind"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Rebind board to Flow project"
+          >
+            <div className="project-modal__title">
+              Rebind "{rebindTarget.boardName}" to a Flow project
+            </div>
+            <p className="project-modal__hint">
+              Pick an existing Google Flow project to link this board to.
+              The previous link (if any) is overwritten — no Flow project
+              is deleted by this action.
+            </p>
+            {remoteProjects.length === 0 ? (
+              <div className="project-sidebar__empty" style={{ padding: 12 }}>
+                No Flow projects loaded yet. Make sure the extension is
+                connected, then click 🔄.
+              </div>
+            ) : (
+              <ul className="project-sidebar__rebind-list">
+                {remoteProjects.map((p) => {
+                  const currentBindId = flowStatus.get(
+                    rebindTarget.boardId,
+                  )?.flow_project_id;
+                  const isCurrent = p.project_id === currentBindId;
+                  return (
+                    <li key={p.project_id}>
+                      <button
+                        type="button"
+                        className={`project-sidebar__rebind-row${
+                          isCurrent
+                            ? " project-sidebar__rebind-row--current"
+                            : ""
+                        }`}
+                        onClick={() => {
+                          if (!isCurrent) {
+                            void handleRebind(
+                              rebindTarget.boardId,
+                              p.project_id,
+                            );
+                          }
+                        }}
+                        disabled={isCurrent}
+                      >
+                        <span className="project-sidebar__rebind-title">
+                          {p.project_title}
+                          {isCurrent && (
+                            <span className="project-sidebar__rebind-current">
+                              · current
+                            </span>
+                          )}
+                        </span>
+                        <span className="project-sidebar__rebind-id">
+                          {p.project_id.slice(0, 8)}…
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            <div className="project-modal__actions">
+              <button
+                type="button"
+                className="project-modal__btn"
+                onClick={() => setRebindTarget(null)}
+              >
+                Cancel
               </button>
             </div>
           </div>
