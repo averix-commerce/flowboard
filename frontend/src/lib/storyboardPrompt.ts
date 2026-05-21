@@ -56,6 +56,12 @@ export function buildStoryboardPrompt(
   // read like a montage instead of a comic-book storyboard. This version
   // pins the layout, numbering, and caption rules so each panel is
   // self-explanatory at a glance.
+  //
+  // Intentionally NO `Style:` clause — visual style is driven by the
+  // upstream reference nodes (character, visual_asset, image). Locking
+  // in "same art style, color palette, character design" here would
+  // override what the user wired in via refs and made the composite
+  // look generic when no refs were attached.
   return [
     `Create a visual storyboard for "${t}" as a SINGLE IMAGE`,
     `arranged in a ${rows}x${cols} comic-book grid (${rows} rows, ${cols} columns, ${total} panels total).`,
@@ -66,7 +72,6 @@ export function buildStoryboardPrompt(
     `  • Each panel is rectangular, identical size, sharply separated from its neighbors.`,
     `  • In the TOP-LEFT corner of every panel, place a small filled CIRCLE with the panel NUMBER (1, 2, 3, …, ${total}) inside it — readable and consistent across all panels.`,
     `  • BENEATH each panel (outside the picture area, in the white gutter), print a SHORT one-sentence CAPTION describing the action of that beat. Use clean, legible sans-serif text. Captions in the same language as the topic.`,
-    `Style: cohesive — every panel shares the same art style, color palette, and character design so the whole sheet reads as one storyboard.`,
   ].join(" ");
 }
 
