@@ -877,14 +877,7 @@ export async function deleteReference(id: number): Promise<void> {
   }
 }
 
-// ── Flow project sync ──────────────────────────────────────────────────────
-
-export interface FlowRemoteProject {
-  project_id: string;
-  project_title: string;
-  thumbnail_media_key: string | null;
-  creation_time: string | null;
-}
+// ── Flow project sync (local → Flow, one direction) ───────────────────────
 
 export interface BoardFlowStatus {
   board_id: number;
@@ -893,25 +886,29 @@ export interface BoardFlowStatus {
   exists_on_flow: boolean;
 }
 
-export interface FlowProjectsResponse {
-  remote_projects: FlowRemoteProject[];
-  truncated: boolean;
+export interface SyncStatusResponse {
   board_status: BoardFlowStatus[];
 }
 
-export function listFlowProjects(): Promise<FlowProjectsResponse> {
-  return api<FlowProjectsResponse>("/api/flow/projects");
+export interface SyncUpAction {
+  board_id: number;
+  board_name: string;
+  old_flow_project_id: string | null;
+  new_flow_project_id: string | null;
+  status: "created" | "rebound" | "failed";
+  error: string | null;
 }
 
-export function rebindBoardToFlowProject(
-  boardId: number,
-  flowProjectId: string,
-): Promise<{ board_id: number; flow_project_id: string }> {
-  return api<{ board_id: number; flow_project_id: string }>(
-    "/api/flow/projects/rebind",
-    {
-      method: "POST",
-      body: JSON.stringify({ board_id: boardId, flow_project_id: flowProjectId }),
-    },
-  );
+export interface SyncUpResponse {
+  synced: SyncUpAction[];
+  failed: SyncUpAction[];
+  total_boards: number;
+}
+
+export function getFlowSyncStatus(): Promise<SyncStatusResponse> {
+  return api<SyncStatusResponse>("/api/flow/projects");
+}
+
+export function syncBoardsUpToFlow(): Promise<SyncUpResponse> {
+  return api<SyncUpResponse>("/api/flow/projects/sync-up", { method: "POST" });
 }

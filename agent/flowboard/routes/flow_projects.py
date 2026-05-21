@@ -1,14 +1,22 @@
-"""Remote Google Flow project list + sync status.
+"""One-way sync: ensure each Flowboard board has a live Flow project.
 
-Pulls the user's project list from labs.google via the
-``project.searchUserProjects`` TRPC endpoint (proxied through the
-Chrome extension's authenticated session) and cross-references with
-``BoardFlowProject`` rows so the frontend can:
+This is a LOCAL → FLOW direction sync. We do NOT import Flow's project
+list into Flowboard's UI. The flow:
 
-  - render the user's actual Flow project list,
-  - flag any Flowboard board whose bound flow_project_id no longer
-    exists on Flow's side (deleted, or the bind never landed properly),
-  - offer re-bind / re-create on those orphans.
+  GET  /api/flow/projects  → per-board sync status (does this board's
+                              flow_project_id still exist on Flow?)
+  POST /api/flow/projects/sync-up → for every board whose flow_project_id
+                                     is missing on Flow (or no binding
+                                     at all), CREATE a new Flow project
+                                     and update BoardFlowProject so the
+                                     dashboard's projects exist on Flow's
+                                     side too. Idempotent: boards that
+                                     already exist on Flow are left
+                                     untouched.
+
+The Flow project list is fetched internally (via the existing TRPC
+search endpoint) just to diff against local binds; the list itself is
+not exposed in the response.
 """
 from __future__ import annotations
 
@@ -19,45 +27,41 @@ from fastapi import APIRouter, HTTPException
 
 from flowboard.db import get_session
 from flowboard.db.models import Board, BoardFlowProject
-from flowboard.services.flow_sdk import get_flow_sdk
+from flowboard.services.flow_sdk import get_flow_sdk, is_valid_project_id
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/flow/projects", tags=["flow-projects"])
 
 
-@router.get("")
-async def list_flow_projects(tool: str = "PINHOLE"):
-    """Return Flow's remote project list + per-board sync status.
-
-    Response shape:
-        {
-          "remote_projects": [
-            {project_id, project_title, thumbnail_media_key?, creation_time?},
-            ...
-          ],
-          "truncated": bool,      # true when we hit the page cap
-          "board_status": [
-            {board_id, board_name, flow_project_id, exists_on_flow},
-            ...
-          ]
-        }
-
-    `exists_on_flow` is true when the board's bound flow_project_id
-    appears in the remote list. False means orphan — the project was
-    deleted on Flow's side (or was never properly created), so any
-    dispatch using it would 404. The frontend renders this as a
-    warning + re-bind affordance.
-    """
+async def _resolve_remote_ids(tool: str) -> set[str]:
+    """Pull the user's Flow project list and return just the id set.
+    Raises HTTPException(502) on extension/TRPC failure."""
     result = await get_flow_sdk().list_user_projects_all(tool=tool)
     if result.get("error"):
         raise HTTPException(
             status_code=502,
             detail={"message": result["error"]},
         )
-    remote_projects: list[dict] = list(result.get("projects") or [])
-    remote_ids = {p["project_id"] for p in remote_projects}
+    projects = result.get("projects") or []
+    return {p["project_id"] for p in projects if isinstance(p, dict) and p.get("project_id")}
 
+
+@router.get("")
+async def get_sync_status(tool: str = "PINHOLE"):
+    """Per-board sync status. Does NOT expose the Flow project list —
+    this is a one-way sync (local → Flow), so the frontend only needs
+    to know which boards are still synced.
+
+    Response:
+        {
+          "board_status": [
+            {board_id, board_name, flow_project_id, exists_on_flow},
+            ...
+          ]
+        }
+    """
+    remote_ids = await _resolve_remote_ids(tool)
     with get_session() as s:
         boards = s.query(Board).order_by(Board.created_at.desc()).all()
         binds = {
@@ -73,47 +77,92 @@ async def list_flow_projects(tool: str = "PINHOLE"):
                 "flow_project_id": pid,
                 "exists_on_flow": (pid in remote_ids) if pid else False,
             })
+    return {"board_status": board_status}
+
+
+@router.post("/sync-up")
+async def sync_up(tool: str = "PINHOLE"):
+    """Push every orphan board up to Flow. For each board where the
+    bound flow_project_id is missing from Flow's remote list (or no
+    binding exists at all), create a new Flow project and replace the
+    BoardFlowProject row.
+
+    Idempotent: boards already in sync are skipped. Returns a per-board
+    action log so the UI can summarise ("synced N boards").
+    """
+    remote_ids = await _resolve_remote_ids(tool)
+
+    # Snapshot the boards that need work. Read-only pass to avoid
+    # holding the session during the TRPC round-trips below.
+    with get_session() as s:
+        boards = s.query(Board).all()
+        binds = {
+            b.board_id: b.flow_project_id
+            for b in s.query(BoardFlowProject).all()
+        }
+        to_sync = [
+            (b.id, b.name, binds.get(b.id))
+            for b in boards
+            if binds.get(b.id) is None or binds.get(b.id) not in remote_ids
+        ]
+
+    actions: list[dict] = []
+    sdk = get_flow_sdk()
+
+    for board_id, board_name, old_pid in to_sync:
+        resp = await sdk.create_project(title=board_name or "Untitled")
+        if resp.get("error"):
+            actions.append({
+                "board_id": board_id,
+                "board_name": board_name,
+                "old_flow_project_id": old_pid,
+                "new_flow_project_id": None,
+                "status": "failed",
+                "error": str(resp["error"])[:200],
+            })
+            continue
+        new_pid = resp.get("project_id")
+        if not isinstance(new_pid, str) or not is_valid_project_id(new_pid):
+            actions.append({
+                "board_id": board_id,
+                "board_name": board_name,
+                "old_flow_project_id": old_pid,
+                "new_flow_project_id": None,
+                "status": "failed",
+                "error": "invalid project_id from Flow",
+            })
+            continue
+
+        with get_session() as s:
+            row = s.get(BoardFlowProject, board_id)
+            if row is None:
+                row = BoardFlowProject(
+                    board_id=board_id, flow_project_id=new_pid
+                )
+            else:
+                row.flow_project_id = new_pid
+            s.add(row)
+            s.commit()
+        logger.info(
+            "sync-up: board %s %s → new flow_project %s",
+            board_id,
+            f"(was {old_pid})" if old_pid else "(no prior bind)",
+            new_pid,
+        )
+        actions.append({
+            "board_id": board_id,
+            "board_name": board_name,
+            "old_flow_project_id": old_pid,
+            "new_flow_project_id": new_pid,
+            "status": "rebound" if old_pid else "created",
+            "error": None,
+        })
 
     return {
-        "remote_projects": remote_projects,
-        "truncated": bool(result.get("truncated")),
-        "board_status": board_status,
+        "synced": [a for a in actions if a["status"] in ("created", "rebound")],
+        "failed": [a for a in actions if a["status"] == "failed"],
+        "total_boards": len(to_sync) + (
+            # boards that were already synced
+            len([1 for b in (binds.values()) if isinstance(b, str) and b in remote_ids])
+        ),
     }
-
-
-@router.post("/rebind")
-async def rebind_board_to_project(body: dict):
-    """Re-point a board at an existing Flow project id (vs creating a new
-    one via /api/boards/{id}/project). Used to recover from orphans:
-    user picks an existing Flow project from the dropdown, we replace
-    the stale BoardFlowProject row.
-
-    Body: ``{board_id: int, flow_project_id: str}``
-    """
-    from flowboard.services.flow_sdk import is_valid_project_id
-
-    board_id = body.get("board_id") if isinstance(body, dict) else None
-    flow_project_id = body.get("flow_project_id") if isinstance(body, dict) else None
-    if not isinstance(board_id, int):
-        raise HTTPException(422, "board_id required")
-    if not isinstance(flow_project_id, str) or not flow_project_id.strip():
-        raise HTTPException(422, "flow_project_id required")
-    flow_project_id = flow_project_id.strip()
-    if not is_valid_project_id(flow_project_id):
-        raise HTTPException(422, "invalid flow_project_id shape")
-
-    with get_session() as s:
-        if not s.get(Board, board_id):
-            raise HTTPException(404, "board not found")
-        row = s.get(BoardFlowProject, board_id)
-        if row is None:
-            row = BoardFlowProject(
-                board_id=board_id, flow_project_id=flow_project_id
-            )
-        else:
-            row.flow_project_id = flow_project_id
-        s.add(row)
-        s.commit()
-        s.refresh(row)
-    logger.info("rebound board %s → flow_project %s", board_id, flow_project_id)
-    return {"board_id": board_id, "flow_project_id": flow_project_id}

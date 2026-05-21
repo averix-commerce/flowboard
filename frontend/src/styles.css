@@ -165,51 +165,13 @@ button:disabled {
   color: #ffd54a;
 }
 
-.project-sidebar__rebind-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  max-height: 320px;
-  overflow-y: auto;
-}
-.project-sidebar__rebind-row {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 10px;
-  text-align: left;
-  background: transparent;
-  border: none;
-  border-bottom: 1px solid var(--border);
-  color: var(--text);
-  cursor: pointer;
-  font-size: 12px;
-}
-.project-sidebar__rebind-row:hover:not(:disabled) {
-  background: var(--panel-high);
-}
-.project-sidebar__rebind-row--current {
-  cursor: default;
-  opacity: 0.7;
-}
-.project-sidebar__rebind-title {
-  font-weight: 500;
-}
-.project-sidebar__rebind-current {
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: normal;
-  margin-left: 4px;
-}
-.project-sidebar__rebind-id {
-  color: var(--muted);
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-}
-.project-modal--rebind {
-  min-width: 380px;
-  max-width: 480px;
+.project-sidebar__sync-ok {
+  margin: 0 10px 4px;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(110, 231, 183, 0.12);
+  color: #6ee7b7;
 }
 .project-sidebar__list {
   list-style: none;
