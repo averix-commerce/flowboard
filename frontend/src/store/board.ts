@@ -282,6 +282,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           charCountry: n.data["charCountry"] as string | undefined,
           charVibe: n.data["charVibe"] as string | undefined,
           charGender: n.data["charGender"] as string | undefined,
+          storyboardGrid: n.data["storyboardGrid"] as StoryboardGrid | undefined,
         },
       }));
 
@@ -337,6 +338,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           charCountry: n.data["charCountry"] as string | undefined,
           charVibe: n.data["charVibe"] as string | undefined,
           charGender: n.data["charGender"] as string | undefined,
+          storyboardGrid: n.data["storyboardGrid"] as StoryboardGrid | undefined,
         },
       }));
       const edges: Edge[] = detail.edges.map(edgeFromDto);
@@ -419,6 +421,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           charCountry: n.data["charCountry"] as string | undefined,
           charVibe: n.data["charVibe"] as string | undefined,
           charGender: n.data["charGender"] as string | undefined,
+          storyboardGrid: n.data["storyboardGrid"] as StoryboardGrid | undefined,
           error: n.data["error"] as string | undefined,
         },
       }));
