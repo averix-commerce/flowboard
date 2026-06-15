@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 _SYNTH_SYSTEM_IMAGE = (
     "You are an image-generation prompt builder for a fashion / e-commerce "
-    "media pipeline. Output ONE concise sentence (max 280 chars) for a "
+    "media pipeline. Output ONE useful prompt for a "
     "photoreal shot combining the input briefs.\n\n"
     "POSE — every shot must look like a real editorial / lookbook photo:\n"
     "  • GAZE: the model's eyes MUST ENGAGE THE CAMERA — direct eye "
@@ -101,8 +101,7 @@ _MULTI_SUBJECT_CLAUSE = (
     "never invasive.\n"
     "  • FRAMING: full upper-body or knees-up framing — wider than a "
     "single-subject shot — so all faces and any product stay in frame.\n"
-    "  • CHAR LIMIT: up to 400 chars for multi-subject scenes (overrides "
-    "the 280 cap) since each subject needs description."
+    "  • Include enough detail for each subject to stay distinct."
 )
 
 # Intent-first motion direction. The earlier version prescribed scene→
@@ -168,7 +167,7 @@ _SYNTH_VIDEO_CORE = (
     "dialogue or singing should the clip include speech, and even "
     "then keep the audio direction generic (no specific accent / "
     "voice characteristic / impersonation) to keep filter risk low.\n\n"
-    "No scene cuts, no text overlays. Max 400 chars. Output the "
+    "No scene cuts, no text overlays. Output the "
     "motion prompt only — no preamble."
 )
 
@@ -482,7 +481,7 @@ _BATCH_SUFFIX = (
     "prompts. Each prompt MUST pick a DIFFERENT stance from the pool — "
     "no two variants may share the same gesture. Output ONLY the JSON "
     "array, no preamble, no markdown fences. Each prompt still respects "
-    "the GAZE rule (face engages camera) and the char cap. Example:\n"
+    "the GAZE rule (face engages camera). Example:\n"
     "[\n"
     "  \"Editorial photo, …, both hands in pockets, …\",\n"
     "  \"Editorial photo, …, hand-on-hip three-quarter, …\",\n"
@@ -614,7 +613,5 @@ async def auto_prompt(node_id: int, *, camera: Optional[str] = None) -> str:
         text = (text or "").strip().strip('"').strip("'")
         if not text:
             raise PromptSynthError("empty response from auto-prompt provider")
-        if len(text) > 500:
-            text = text[:500].rstrip() + "…"
         activity.set_result({"prompt": text})
         return text

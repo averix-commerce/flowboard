@@ -894,7 +894,7 @@ async def test_auto_prompt_raises_for_unknown_node(client):
 
 
 @pytest.mark.asyncio
-async def test_auto_prompt_caps_long_responses(client, monkeypatch):
+async def test_auto_prompt_preserves_long_responses(client, monkeypatch):
     ids = _seed_board_with_chain()
     long_text = "a" * 900
 
@@ -903,8 +903,7 @@ async def test_auto_prompt_caps_long_responses(client, monkeypatch):
 
     monkeypatch.setattr(prompt_synth, "run_llm", stub_run)
     out = await prompt_synth.auto_prompt(ids["target_id"])
-    assert len(out) <= 501
-    assert out.endswith("…")
+    assert out == long_text
 
 
 def test_route_happy_path(client, monkeypatch):

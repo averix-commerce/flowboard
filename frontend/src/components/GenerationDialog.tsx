@@ -814,14 +814,13 @@ export function GenerationDialog() {
                   </span>
                 )}
               </label>
-              <span className="gen-dialog__char-count">{prompt.length}/500</span>
+              <span className="gen-dialog__char-count">{prompt.length} chars</span>
             </div>
             <textarea
               id="gen-prompt"
               ref={firstFocusRef}
               className="gen-dialog__textarea"
               rows={5}
-              maxLength={500}
               value={prompt}
               onChange={(e) => {
                 setPrompt(e.target.value);
@@ -918,14 +917,13 @@ export function GenerationDialog() {
                   Mô tả thêm (tuỳ chọn)
                   <InfoTip tip="Prompt được auto-build: portrait headshot · vibe styling · photorealistic — tối ưu cho character reference." />
                 </label>
-                <span className="gen-dialog__char-count">{charExtras.length}/200</span>
+                <span className="gen-dialog__char-count">{charExtras.length} chars</span>
               </div>
               <textarea
                 id="gen-char-extras"
                 ref={firstFocusRef}
                 className="gen-dialog__textarea"
                 rows={3}
-                maxLength={200}
                 value={charExtras}
                 onChange={(e) => setCharExtras(e.target.value)}
                 placeholder="Tuổi, kiểu tóc, trang phục, biểu cảm…"
