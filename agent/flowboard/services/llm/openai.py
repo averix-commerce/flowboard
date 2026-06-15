@@ -31,6 +31,7 @@ import logging
 import mimetypes
 import re
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Optional
@@ -235,8 +236,13 @@ class OpenAIProvider:
         attachments: Optional[list[str]],
         timeout: float,
     ) -> str:
-        """Spawn `codex exec --output-format json -p <prompt>` and parse
-        the JSON envelope (similar shape to `claude` CLI)."""
+        """Spawn `codex exec` and return its final assistant message.
+
+        Current Codex CLI versions no longer support the old
+        ``--output-format json`` flag, and ``-p`` now means ``--profile``
+        rather than "prompt". Use stdin for the prompt and
+        ``--output-last-message`` for stable machine-readable capture.
+        """
         import os
 
         # Validate inputs
@@ -254,57 +260,63 @@ class OpenAIProvider:
         # cmd.exe re-parses argv for ``.cmd``-shimmed binaries and
         # mangles newlines / quotes in long prompts. Stdin sidesteps the
         # parser entirely.
-        args: list[str] = [
-            codex_bin, "exec", "--output-format", "json", "-p", "-",
-        ]
+        full_prompt = user_prompt
         if system_prompt:
-            args += ["--system", system_prompt]
-        if attachments and self._cli_image_flag:
-            for path in attachments:
-                args += [self._cli_image_flag, os.path.abspath(path)]
-
-        try:
-            result = subprocess.run(
-                args,
-                input=user_prompt.encode("utf-8"),
-                capture_output=True,
-                timeout=timeout,
+            full_prompt = (
+                "System instructions:\n"
+                f"{system_prompt}\n\n"
+                "User prompt:\n"
+                f"{user_prompt}"
             )
-        except FileNotFoundError as exc:
-            raise LLMError("codex CLI not found on PATH") from exc
-        except subprocess.TimeoutExpired as exc:
-            raise LLMError(f"codex CLI timed out after {timeout}s") from exc
-        except Exception as exc:  # noqa: BLE001
-            raise LLMError(f"codex CLI error: {exc}") from exc
 
-        if result.returncode != 0:
-            stderr = result.stderr.decode(errors="replace")[:400]
-            raise LLMError(f"codex CLI exited {result.returncode}: {stderr}")
+        with tempfile.TemporaryDirectory(prefix="flowboard-codex-") as tmp_dir:
+            out_path = os.path.join(tmp_dir, "last-message.txt")
+            args: list[str] = [
+                codex_bin,
+                "exec",
+                "--json",
+                "--output-last-message",
+                out_path,
+                "--sandbox",
+                "read-only",
+            ]
+            if attachments and self._cli_image_flag:
+                for path in attachments:
+                    args += [self._cli_image_flag, os.path.abspath(path)]
+            args.append("-")
 
-        stdout = result.stdout.decode(errors="replace")
-        try:
-            envelope = json.loads(stdout)
-        except json.JSONDecodeError as exc:
-            raise LLMError(
-                f"codex CLI returned non-JSON output: {stdout[:200]}"
-            ) from exc
+            try:
+                result = subprocess.run(
+                    args,
+                    input=full_prompt.encode("utf-8"),
+                    capture_output=True,
+                    timeout=timeout,
+                )
+            except FileNotFoundError as exc:
+                raise LLMError("codex CLI not found on PATH") from exc
+            except subprocess.TimeoutExpired as exc:
+                raise LLMError(f"codex CLI timed out after {timeout}s") from exc
+            except Exception as exc:  # noqa: BLE001
+                raise LLMError(f"codex CLI error: {exc}") from exc
 
-        if not isinstance(envelope, dict):
-            raise LLMError("codex CLI envelope is not an object")
+            if result.returncode != 0:
+                stderr = result.stderr.decode(errors="replace")[:400]
+                stdout = result.stdout.decode(errors="replace")[:400]
+                detail = stderr or stdout or "no output"
+                raise LLMError(f"codex CLI exited {result.returncode}: {detail}")
 
-        # Codex envelope shape mirrors Claude CLI: {result: "..."} or
-        # {is_error: true, ...}. Tolerate both `result` and `output_text`
-        # since the exact field name has shifted across CLI versions.
-        if envelope.get("is_error") or envelope.get("error"):
-            raise LLMError(
-                f"codex CLI reported error: "
-                f"{envelope.get('error') or envelope.get('result') or 'unknown'}"
-            )
-        for key in ("result", "output_text", "text"):
-            val = envelope.get(key)
-            if isinstance(val, str):
-                return val
-        raise LLMError(f"codex CLI envelope missing string output: {envelope!r:.200}")
+            try:
+                output_text = Path(out_path).read_text(encoding="utf-8").strip()
+            except OSError as exc:
+                raise LLMError("codex CLI did not write a final message") from exc
+            if output_text:
+                return output_text
+
+            stdout = result.stdout.decode(errors="replace")
+            parsed_text = _extract_text_from_codex_jsonl(stdout)
+            if parsed_text:
+                return parsed_text
+            raise LLMError("codex CLI returned an empty final message")
 
     # ── API dispatch ─────────────────────────────────────────────────
 
@@ -384,6 +396,26 @@ def _image_url_block(path: str) -> dict:
         "type": "image_url",
         "image_url": {"url": f"data:{mime};base64,{b64}"},
     }
+
+
+def _extract_text_from_codex_jsonl(stdout: str) -> Optional[str]:
+    """Best-effort fallback for Codex ``--json`` event streams."""
+    last_text: Optional[str] = None
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        for key in ("result", "output_text", "text", "message"):
+            value = event.get(key)
+            if isinstance(value, str) and value.strip():
+                last_text = value.strip()
+    return last_text
 
 
 def _safe_error_message(resp: httpx.Response) -> str:
