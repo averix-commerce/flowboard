@@ -724,15 +724,25 @@ class FlowSDK:
                 continue
             raw_polls.append({"name": name, "media_id": mid, "resp": resp})
 
-            # Transport / API failure — keep polling. Treat 404 as "not ready"
-            # too; Flow sometimes 404s the media endpoint mid-render.
+            # Transport / API failure — keep polling. Treat 404 and 5xx as
+            # "not ready" too; Flow sometimes returns transient INTERNAL
+            # errors from the media endpoint while the workflow is still
+            # scheduled/rendering. 4xx responses with structured Flow errors
+            # are terminal (content filter, invalid media, auth drift, etc.).
             if not isinstance(resp, dict):
                 ops_summary.append(
                     {"name": name, "done": False, "media_entries": [], "status": None, "error": None}
                 )
                 continue
             status_code = resp.get("status")
-            if isinstance(status_code, int) and status_code >= 400 and status_code != 404:
+            if isinstance(status_code, int) and (
+                status_code == 404 or status_code >= 500
+            ):
+                ops_summary.append(
+                    {"name": name, "done": False, "media_entries": [], "status": None, "error": None}
+                )
+                continue
+            if isinstance(status_code, int) and status_code >= 400:
                 # Surface the inner Flow error (e.g. content filter).
                 inner = _extract_inner_api_error(resp)
                 ops_summary.append(

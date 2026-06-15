@@ -839,6 +839,37 @@ async def test_check_async_workflow_mode_partial_bytes_means_pending():
 
 
 @pytest.mark.asyncio
+async def test_check_async_workflow_mode_5xx_means_pending():
+    """Flow's media endpoint can return transient INTERNAL while the
+    workflow is still scheduled/rendering. Keep polling instead of turning
+    the whole video request into an immediate failure."""
+
+    class WorkflowClient(RecordingClient):
+        async def api_request(self, **kwargs):
+            self.api_calls.append(kwargs)
+            return {
+                "status": 500,
+                "data": {
+                    "error": {
+                        "code": 500,
+                        "message": "Internal error encountered.",
+                        "status": "INTERNAL",
+                    }
+                },
+            }
+
+    c = WorkflowClient()
+    sdk = FlowSDK(client=c)  # type: ignore[arg-type]
+    out = await sdk.check_async(
+        ["wf-uuid"],
+        workflows=[{"name": "wf-uuid", "primary_media_id": "primary-vid-1"}],
+    )
+    assert out["operations"][0]["done"] is False
+    assert out["operations"][0]["error"] is None
+    assert out["operations"][0]["media_entries"] == []
+
+
+@pytest.mark.asyncio
 async def test_check_async_mixed_schemas_routes_correctly():
     """A single batch can mix OLD operations and NEW workflows (e.g. when a
     retry of a workflow op is re-dispatched as workflow). Operation names
