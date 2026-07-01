@@ -8,6 +8,11 @@ DB_PATH = Path(os.getenv("FLOWBOARD_DB", STORAGE_DIR / "flowboard.db"))
 HTTP_PORT = int(os.getenv("FLOWBOARD_HTTP_PORT", "8101"))
 WS_HOST = os.getenv("FLOWBOARD_WS_HOST", "127.0.0.1")
 EXTENSION_WS_PORT = int(os.getenv("FLOWBOARD_EXT_WS_PORT", "9223"))
+ALLOW_NON_LOOPBACK_WS = os.getenv("FLOWBOARD_ALLOW_NON_LOOPBACK_WS", "").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 
 PLANNER_MODEL = os.getenv("FLOWBOARD_PLANNER_MODEL", "claude-sonnet-4-6")
 # "cli" → always use claude CLI; "mock" → always mock; "auto" → CLI if available,

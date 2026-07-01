@@ -377,6 +377,47 @@ matching vocab from the system prompt.
 
 > **Windows:** Use [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install). All commands assume a Unix shell.
 
+### Docker quickstart
+
+If you only want to run Flowboard locally after cloning, Docker is the
+shortest path:
+
+```bash
+git clone https://github.com/<your-fork>/flowboard.git
+cd flowboard
+docker compose up --build
+```
+
+Then open <http://localhost:5173>. The compose stack runs:
+
+- frontend: <http://localhost:5173>
+- agent API: <http://127.0.0.1:8101>
+- Chrome extension bridge: `ws://127.0.0.1:9223`
+- persistent data: `./storage`
+
+Load the Chrome extension from `extension/` exactly as described in Step 1
+below, then open <https://labs.google/fx/tools/flow> and sign in. The
+extension still connects to `127.0.0.1:9223`; Docker publishes that port
+on localhost only.
+
+Stop the stack with:
+
+```bash
+docker compose down
+```
+
+Notes:
+
+- Docker does not replace Chrome or the unpacked extension; the extension
+  is still mandatory for Google Flow generation.
+- LLM CLI providers such as Claude Code, Gemini CLI, or Codex must be
+  available inside the agent container if you want CLI-backed vision,
+  auto-prompt, or planner features. Without that, set
+  `FLOWBOARD_PLANNER_BACKEND=mock docker compose up --build` for a smoke
+  test, or configure API-key-backed providers in the app where supported.
+- Ports are bound to `127.0.0.1` in `docker-compose.yml` so the
+  unauthenticated extension bridge is not exposed to the network.
+
 ### One-line setup (optional)
 
 If you have `make` installed, the repo ships shortcut targets that wrap
@@ -388,6 +429,7 @@ make install-dev    # same, but adds ruff + pytest extras
 make update         # upgrade agent + frontend deps in place
 make agent          # run FastAPI on :8101
 make frontend       # run Vite on :5173
+make docker-up      # run agent + frontend with Docker Compose
 ```
 
 `uv` is auto-detected (~10× faster installs). Install it once with

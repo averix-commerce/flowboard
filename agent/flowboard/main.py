@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Header, Request as FastAPIRequest
 from fastapi.middleware.cors import CORSMiddleware
 
-from flowboard.config import WS_HOST
+from flowboard.config import ALLOW_NON_LOOPBACK_WS, EXTENSION_WS_PORT, WS_HOST
 from flowboard.db import get_session, init_db
 from flowboard.db.models import Request
 from flowboard.routes import activity, auth, boards, chat, edges, flow_projects, llm, media, nodes, plans, projects, prompt, upload, vision
@@ -19,10 +19,12 @@ from flowboard.worker.processor import get_worker
 # Guard rail: the dedicated WS server is unauthenticated and would expose the
 # callback secret to any process that can reach it. Refuse to boot if someone
 # overrode WS_HOST to a non-loopback address.
-if WS_HOST not in ("127.0.0.1", "localhost", "::1"):
+if WS_HOST not in ("127.0.0.1", "localhost", "::1") and not ALLOW_NON_LOOPBACK_WS:
     raise RuntimeError(
         f"FLOWBOARD_WS_HOST must be loopback (got {WS_HOST!r}); the extension WS "
-        "is unauthenticated by design and must not be network-reachable."
+        "is unauthenticated by design and must not be network-reachable. If you are "
+        "running inside Docker, publish the port to 127.0.0.1 only and set "
+        "FLOWBOARD_ALLOW_NON_LOOPBACK_WS=1."
     )
 
 logger = logging.getLogger(__name__)
@@ -58,7 +60,7 @@ async def lifespan(app: FastAPI):
     worker = get_worker()
     ws_task = asyncio.create_task(run_ws_server(), name="ext-ws-server")
     worker_task = asyncio.create_task(worker.start(), name="request-worker")
-    logger.info("flowboard agent started (ws:9223 + worker)")
+    logger.info("flowboard agent started (ws:%d + worker)", EXTENSION_WS_PORT)
     try:
         yield
     finally:

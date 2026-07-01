@@ -1,0 +1,40 @@
+services:
+  agent:
+    build:
+      context: ./agent
+    environment:
+      FLOWBOARD_STORAGE: /data
+      FLOWBOARD_DB: /data/flowboard.db
+      FLOWBOARD_HTTP_PORT: "8101"
+      FLOWBOARD_WS_HOST: 0.0.0.0
+      FLOWBOARD_EXT_WS_PORT: "9223"
+      FLOWBOARD_ALLOW_NON_LOOPBACK_WS: "1"
+      FLOWBOARD_PLANNER_BACKEND: ${FLOWBOARD_PLANNER_BACKEND:-auto}
+    ports:
+      - "127.0.0.1:8101:8101"
+      - "127.0.0.1:9223:9223"
+    volumes:
+      - ./storage:/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8101/api/health', timeout=2)",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      VITE_AGENT_PROXY_TARGET: http://agent:8101
+      VITE_AGENT_PROXY_WS_TARGET: ws://agent:8101
+    ports:
+      - "127.0.0.1:5173:5173"
+    depends_on:
+      agent:
+        condition: service_healthy

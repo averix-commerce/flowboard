@@ -2,6 +2,10 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 
+const agentTarget = process.env.VITE_AGENT_PROXY_TARGET ?? "http://localhost:8101";
+const agentWsTarget =
+  process.env.VITE_AGENT_PROXY_WS_TARGET ?? agentTarget.replace(/^http/, "ws");
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -12,10 +16,10 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": "http://localhost:8101",
-      "/media": "http://localhost:8101",
+      "/api": agentTarget,
+      "/media": agentTarget,
       "/ws": {
-        target: "ws://localhost:8101",
+        target: agentWsTarget,
         ws: true,
       },
     },

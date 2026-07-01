@@ -1,4 +1,4 @@
-.PHONY: help install install-dev update dev agent frontend extension clean
+.PHONY: help install install-dev update dev agent frontend extension docker-up docker-down docker-logs clean
 
 # Prefer uv (https://github.com/astral-sh/uv) — ~10× faster than pip.
 # Falls back to stdlib venv + pip when uv is not installed.
@@ -13,6 +13,9 @@ help:
 	@echo "  make agent        - run agent only (FastAPI on :8101)"
 	@echo "  make frontend     - run frontend only (Vite on :5173)"
 	@echo "  make extension    - package extension (unpacked: load from ./extension)"
+	@echo "  make docker-up    - run agent + frontend with Docker Compose"
+	@echo "  make docker-down  - stop Docker Compose services"
+	@echo "  make docker-logs  - follow Docker Compose logs"
 	@echo "  make clean        - remove build + cache"
 
 install:
@@ -48,6 +51,15 @@ agent:
 
 frontend:
 	cd frontend && npm run dev
+
+docker-up:
+	docker compose up --build
+
+docker-down:
+	docker compose down
+
+docker-logs:
+	docker compose logs -f
 
 clean:
 	rm -rf agent/.venv agent/**/__pycache__ frontend/node_modules frontend/dist
