@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useGenerationStore } from "../store/generation";
+import { useGenerationStore, type MockupBatchPair } from "../store/generation";
 import { useBoardStore, type StoryboardGrid } from "../store/board";
 import {
   STORYBOARD_GRIDS,
@@ -216,6 +216,7 @@ export function GenerationDialog() {
   const [prompt, setPrompt] = useState(openDialog.prompt);
   const [aspectRatio, setAspectRatio] = useState<AspectKey>("IMAGE_ASPECT_RATIO_LANDSCAPE");
   const [variants, setVariants] = useState(1);
+  const [mockupBatch, setMockupBatch] = useState(false);
   const [camera, setCamera] = useState<CameraKey>("static");
   // Storyboard layout. The node dispatches via the standard image
   // handler with a locked template prompt wrapping the user's topic
@@ -384,6 +385,27 @@ export function GenerationDialog() {
         })
         .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
     : [];
+  const canUseMockupBatch =
+    !isVideo && !isPrompt && !isCharacter && !isStoryboard && refSourceNodes.length >= 2;
+  const mockupArtwork = canUseMockupBatch ? refSourceNodes[0] : null;
+  const mockupTemplates = canUseMockupBatch ? refSourceNodes.slice(1) : [];
+  const mockupPairs: MockupBatchPair[] =
+    mockupArtwork === null
+      ? []
+      : mockupTemplates.map((template) => ({
+          artwork_media_id: mockupArtwork.mediaId,
+          artwork_node_id: mockupArtwork.node.id,
+          artwork_short_id: mockupArtwork.node.data.shortId,
+          mockup_media_id: template.mediaId,
+          mockup_node_id: template.node.id,
+          mockup_short_id: template.node.data.shortId,
+        }));
+  const mockupOutputTargets = canUseMockupBatch && rfId
+    ? edges
+        .filter((e) => e.source === rfId)
+        .map((e) => nodes.find((n) => n.id === e.target))
+        .filter((n): n is NonNullable<typeof n> => !!n && n.data.type === "image")
+    : [];
 
   // Reset form when dialog opens for a different node
   useEffect(() => {
@@ -432,6 +454,12 @@ export function GenerationDialog() {
       }
       setAspectRatio(nextAspect);
       setVariants(1);
+      const openRefCount = useBoardStore
+        .getState()
+        .edges.filter((e) => e.target === rfId)
+        .map((e) => useBoardStore.getState().nodes.find((n) => n.id === e.source))
+        .filter((n) => n && REF_SOURCE_TYPES.has(n.data.type)).length;
+      setMockupBatch(openNodeType === "image" && openRefCount >= 2);
       setCamera("static");
       // Hydrate storyboard grid from existing node data when reopening.
       // Fresh nodes + legacy values ("3x3" from 1.2.15-1.2.18) → "2x2".
@@ -728,11 +756,45 @@ export function GenerationDialog() {
         variantCount: picked.length,
       });
     } else {
+      const activeMockupPairs = mockupBatch && canUseMockupBatch ? mockupPairs : [];
+      if (activeMockupPairs.length > 0) {
+        if (mockupOutputTargets.length < activeMockupPairs.length) {
+          useGenerationStore.setState({
+            error: `Mockup batch needs ${activeMockupPairs.length} output image node(s) connected on the right; found ${mockupOutputTargets.length}.`,
+          });
+          return;
+        }
+        const configStamp = {
+          prompt: finalPrompt,
+          aspectRatio,
+          variantCount: variants,
+          mockupBatch: true,
+          mockupOutputCount: activeMockupPairs.length,
+        };
+        useBoardStore.getState().updateNodeData(rfId, configStamp);
+        const dbId = parseInt(rfId, 10);
+        if (!isNaN(dbId)) {
+          patchNode(dbId, { data: configStamp }).catch(() => {});
+        }
+        activeMockupPairs.forEach((pair, idx) => {
+          const target = mockupOutputTargets[idx];
+          dispatchGeneration(target.id, {
+            prompt: finalPrompt,
+            aspectRatio,
+            variantCount: variants,
+            mockupPairs: [pair],
+            prompts: perVariantPrompts,
+          });
+        });
+        closeGenerationDialog();
+        return;
+      }
       dispatchGeneration(rfId, {
         prompt: finalPrompt,
         aspectRatio,
-        variantCount: variants,
-        prompts: perVariantPrompts,
+        variantCount: activeMockupPairs.length > 0 ? activeMockupPairs.length : variants,
+        mockupPairs: activeMockupPairs,
+        prompts: activeMockupPairs.length > 0 ? undefined : perVariantPrompts,
       });
     }
     closeGenerationDialog();
@@ -758,6 +820,8 @@ export function GenerationDialog() {
     ? refSourceNodes.length > 0 && !isWorking
     : isVideo
     ? selectedSourceIdx.size > 0 && !isWorking
+    : mockupBatch
+    ? mockupPairs.length > 0 && mockupOutputTargets.length >= mockupPairs.length && !isWorking
     : !isWorking;
 
   return (
@@ -1139,6 +1203,42 @@ export function GenerationDialog() {
         )}
 
         {/* Aspect ratio — irrelevant for prompt nodes (text-only). */}
+        {canUseMockupBatch && (
+          <div className="gen-dialog__field">
+            <label className="mockup-batch-toggle">
+              <input
+                type="checkbox"
+                checked={mockupBatch}
+                onChange={(e) => setMockupBatch(e.target.checked)}
+              />
+              <span className="mockup-batch-toggle__body">
+                <span className="mockup-batch-toggle__title">
+                  Mockup batch
+                  <InfoTip tip="Uses the first source reference as artwork, then generates one result per remaining mockup reference. Each output is a separate Flow image request, so templates are not mixed together." />
+                </span>
+                <span className="mockup-batch-toggle__meta">
+                  Artwork #{mockupArtwork?.node.data.shortId} -&gt; {mockupPairs.length} mockup source{mockupPairs.length !== 1 ? "s" : ""} -&gt; {mockupOutputTargets.length} output node{mockupOutputTargets.length !== 1 ? "s" : ""}
+                </span>
+              </span>
+            </label>
+            {mockupBatch && (
+              <div className="mockup-batch-map">
+                <span className="mockup-batch-map__art">
+                  Artwork #{mockupArtwork?.node.data.shortId}
+                </span>
+                <span className="mockup-batch-map__arrow">-&gt;</span>
+                <span className="mockup-batch-map__templates">
+                  {mockupTemplates.map((m) => `#${m.node.data.shortId}`).join(", ")}
+                </span>
+                <span className="mockup-batch-map__arrow">-&gt;</span>
+                <span className="mockup-batch-map__templates">
+                  {mockupOutputTargets.map((m) => `#${m.data.shortId}`).join(", ") || "connect output nodes"}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
         {!isPrompt && (
           <div className="gen-dialog__field">
             <span className="gen-dialog__label">Aspect ratio</span>
@@ -1272,7 +1372,9 @@ export function GenerationDialog() {
             above) and prompt nodes. */}
         {!isVideo && !isPrompt && (
           <div className="gen-dialog__field">
-            <span className="gen-dialog__label">Variants</span>
+            <span className="gen-dialog__label">
+              Variants{mockupBatch ? " per output node" : ""}
+            </span>
             <div className="variants-stepper">
               <button
                 type="button"
@@ -1291,7 +1393,11 @@ export function GenerationDialog() {
               >
                 +
               </button>
-              <span className="variants-stepper__hint">1–4 images per request</span>
+              <span className="variants-stepper__hint">
+                {mockupBatch
+                  ? `1-4 images per output node (${mockupPairs.length * variants} total)`
+                  : "1-4 images per request"}
+              </span>
             </div>
           </div>
         )}

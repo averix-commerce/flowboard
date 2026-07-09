@@ -48,6 +48,7 @@ export interface FlowboardNodeData extends Record<string, unknown> {
   // filter reason on the blocked tile instead of falling through to
   // the previous variant.
   slotErrors?: (string | null)[];
+  mockupSlots?: Array<Record<string, unknown>>;
   variantCount?: number;
   // The aspect-ratio enum the asset was generated / uploaded at — used to
   // default-match downstream gen dialogs (e.g. a 9:16 visual_asset feeds
@@ -274,6 +275,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           mediaId: n.data["mediaId"] as string | undefined,
           mediaIds: n.data["mediaIds"] as (string | null)[] | undefined,
           slotErrors: n.data["slotErrors"] as (string | null)[] | undefined,
+          mockupSlots: n.data["mockupSlots"] as Array<Record<string, unknown>> | undefined,
           variantCount: n.data["variantCount"] as number | undefined,
           aspectRatio: n.data["aspectRatio"] as string | undefined,
           aiBrief: n.data["aiBrief"] as string | undefined,
@@ -330,6 +332,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           mediaId: n.data["mediaId"] as string | undefined,
           mediaIds: n.data["mediaIds"] as (string | null)[] | undefined,
           slotErrors: n.data["slotErrors"] as (string | null)[] | undefined,
+          mockupSlots: n.data["mockupSlots"] as Array<Record<string, unknown>> | undefined,
           variantCount: n.data["variantCount"] as number | undefined,
           aspectRatio: n.data["aspectRatio"] as string | undefined,
           aiBrief: n.data["aiBrief"] as string | undefined,
@@ -414,6 +417,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           mediaId: n.data["mediaId"] as string | undefined,
           mediaIds: n.data["mediaIds"] as (string | null)[] | undefined,
           slotErrors: n.data["slotErrors"] as (string | null)[] | undefined,
+          mockupSlots: n.data["mockupSlots"] as Array<Record<string, unknown>> | undefined,
           variantCount: n.data["variantCount"] as number | undefined,
           aiBrief: n.data["aiBrief"] as string | undefined,
           imageModel: n.data["imageModel"] as string | undefined,

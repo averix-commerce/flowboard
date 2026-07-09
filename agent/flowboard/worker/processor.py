@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Optional
@@ -140,6 +141,181 @@ async def _handle_gen_image(params: dict) -> tuple[dict, Optional[str]]:
         except Exception:  # noqa: BLE001
             logger.exception("auto-ingest from gen_image response failed")
     return resp, None
+
+
+async def _handle_gen_mockup_batch(params: dict) -> tuple[dict, Optional[str]]:
+    from flowboard.services.flow_sdk import is_valid_project_id
+
+    prompt = params.get("prompt")
+    project_id = params.get("project_id")
+    if not isinstance(prompt, str) or not prompt.strip():
+        return {}, "missing_prompt"
+    if not isinstance(project_id, str) or not project_id.strip():
+        return {}, "missing_project_id"
+    project_id = project_id.strip()
+    if not is_valid_project_id(project_id):
+        return {}, "invalid_project_id"
+
+    tier = params.get("paygate_tier") or flow_client.paygate_tier
+    if tier is None:
+        return {}, "paygate_tier_unknown"
+
+    raw_pairs = params.get("mockup_pairs")
+    if not isinstance(raw_pairs, list) or len(raw_pairs) == 0:
+        return {}, "missing_mockup_pairs"
+
+    aspect = params.get("aspect_ratio") or "IMAGE_ASPECT_RATIO_LANDSCAPE"
+    image_model = params.get("image_model")
+    if not isinstance(image_model, str) or not image_model.strip():
+        image_model = None
+    raw_count = params.get("variant_count")
+    variant_count = 1
+    if isinstance(raw_count, int) and raw_count > 0:
+        variant_count = max(1, min(raw_count, 4))
+
+    mockup_instruction = (
+        "Edit the base mockup image, do not create a new scene. Use the "
+        "reference image as the artwork/design source. Place that artwork "
+        "onto the visible printable area of the base mockup. Preserve the "
+        "base mockup camera angle, crop, lighting, shadows, reflections, "
+        "material, handle, background, and all non-print details. Do not "
+        "show the artwork as a separate object or redraw the original "
+        "artwork photo; it must appear printed on the mockup surface."
+    )
+    slot_prompt = f"{prompt.strip()}\n\n{mockup_instruction}"
+    raw_prompts = params.get("prompts")
+    per_variant_prompts: Optional[list[str]] = None
+    if isinstance(raw_prompts, list):
+        cleaned = [
+            f"{p.strip()}\n\n{mockup_instruction}"
+            for p in raw_prompts
+            if isinstance(p, str) and p.strip()
+        ]
+        per_variant_prompts = cleaned or None
+
+    request_id = params.get("__request_id")
+    media_ids: list[Optional[str]] = []
+    slot_errors: list[Optional[str]] = []
+    mockup_slots: list[dict[str, Any]] = []
+    media_entries: list[dict[str, Any]] = []
+
+    for idx, raw_pair in enumerate(raw_pairs):
+        if _is_request_canceled(request_id):
+            return {
+                "media_ids": media_ids,
+                "media_entries": media_entries,
+                "slot_errors": slot_errors,
+                "mockup_slots": mockup_slots,
+            }, "canceled"
+
+        if not isinstance(raw_pair, dict):
+            media_ids.append(None)
+            slot_errors.append("invalid_mockup_pair")
+            mockup_slots.append({"index": idx, "error": "invalid_mockup_pair"})
+            continue
+
+        artwork_id = raw_pair.get("artwork_media_id")
+        mockup_id = raw_pair.get("mockup_media_id")
+        if not isinstance(artwork_id, str) or not artwork_id.strip():
+            media_ids.append(None)
+            slot_errors.append("missing_artwork_media_id")
+            mockup_slots.append({**raw_pair, "index": idx, "error": "missing_artwork_media_id"})
+            continue
+        if not isinstance(mockup_id, str) or not mockup_id.strip():
+            media_ids.append(None)
+            slot_errors.append("missing_mockup_media_id")
+            mockup_slots.append({**raw_pair, "index": idx, "error": "missing_mockup_media_id"})
+            continue
+
+        for variant_idx in range(variant_count):
+            variant_prompt = (
+                per_variant_prompts[variant_idx]
+                if per_variant_prompts and variant_idx < len(per_variant_prompts)
+                else slot_prompt
+            )
+            resp = await get_flow_sdk().edit_image(
+                prompt=variant_prompt,
+                project_id=project_id,
+                source_media_id=mockup_id.strip(),
+                ref_media_ids=[artwork_id.strip()],
+                aspect_ratio=aspect,
+                paygate_tier=tier,
+                image_model=image_model,
+            )
+            if resp.get("error"):
+                err = str(resp["error"])[:200]
+                media_ids.append(None)
+                slot_errors.append(err)
+                mockup_slots.append({
+                    **raw_pair,
+                    "index": len(mockup_slots),
+                    "pair_index": idx,
+                    "variant_index": variant_idx,
+                    "error": err,
+                })
+                continue
+
+            entries = [
+                e for e in (resp.get("media_entries") or [])
+                if isinstance(e, dict)
+            ]
+            resp_ids = resp.get("media_ids")
+            media_id = None
+            if isinstance(resp_ids, list) and resp_ids:
+                candidate = resp_ids[0]
+                if isinstance(candidate, str) and candidate:
+                    media_id = candidate
+            if media_id is None:
+                for entry in entries:
+                    candidate = entry.get("media_id")
+                    if isinstance(candidate, str) and candidate:
+                        media_id = candidate
+                        break
+
+            media_ids.append(media_id)
+            slot_errors.append(None if media_id else "missing_media_id")
+            slot_data = {
+                **raw_pair,
+                "index": len(mockup_slots),
+                "pair_index": idx,
+                "variant_index": variant_idx,
+            }
+            if media_id:
+                slot_data["media_id"] = media_id
+            else:
+                slot_data["error"] = "missing_media_id"
+            mockup_slots.append(slot_data)
+            media_entries.extend(entries)
+
+    entries_with_urls = [
+        e for e in media_entries if isinstance(e, dict) and e.get("url")
+    ]
+    if entries_with_urls:
+        try:
+            media_service.ingest_urls(entries_with_urls)
+        except Exception:  # noqa: BLE001
+            logger.exception("auto-ingest from mockup batch response failed")
+
+    success_count = sum(1 for mid in media_ids if mid)
+    partial_error = None
+    if success_count < len(media_ids):
+        failed = len(media_ids) - success_count
+        unique_errs = sorted({e for e in slot_errors if e})
+        partial_error = f"{failed}/{len(media_ids)} mockup slots failed"
+        if unique_errs:
+            partial_error = f"{partial_error}: {', '.join(unique_errs[:3])}"
+
+    result = {
+        "media_ids": media_ids,
+        "media_entries": media_entries,
+        "slot_errors": slot_errors,
+        "mockup_slots": mockup_slots,
+    }
+    if partial_error:
+        result["partial_error"] = partial_error
+    if success_count == 0:
+        return result, partial_error or "mockup_batch_failed"
+    return result, None
 
 
 # Video polling knobs — overridable in tests. 5-minute hard deadline
@@ -652,6 +828,7 @@ _DEFAULT_HANDLERS: dict[str, Handler] = {
     "proxy": _handle_proxy,
     "create_project": _handle_create_project,
     "gen_image": _handle_gen_image,
+    "gen_mockup_batch": _handle_gen_mockup_batch,
     "gen_video": _handle_gen_video,
     "gen_video_omni": _handle_gen_video_omni,
     "edit_image": _handle_edit_image,
@@ -659,13 +836,26 @@ _DEFAULT_HANDLERS: dict[str, Handler] = {
 
 
 class WorkerController:
-    """Single-consumer async queue worker."""
+    """Bounded-concurrency async queue worker."""
 
-    def __init__(self, handlers: Optional[dict[str, Handler]] = None) -> None:
+    def __init__(
+        self,
+        handlers: Optional[dict[str, Handler]] = None,
+        max_concurrency: Optional[int] = None,
+    ) -> None:
         self._queue: asyncio.Queue[int] = asyncio.Queue()
         self._handlers = dict(handlers or _DEFAULT_HANDLERS)
         self._shutdown = asyncio.Event()
         self._active = 0
+        if max_concurrency is None:
+            raw = os.getenv("FLOWBOARD_WORKER_CONCURRENCY", "3")
+            try:
+                max_concurrency = int(raw)
+            except ValueError:
+                max_concurrency = 3
+        self._max_concurrency = max(1, max_concurrency)
+        self._slots = asyncio.Semaphore(self._max_concurrency)
+        self._tasks: set[asyncio.Task[None]] = set()
         self._started_at: Optional[float] = None
 
     # ── enqueue ────────────────────────────────────────────────────────────
@@ -675,20 +865,31 @@ class WorkerController:
     # ── lifecycle ──────────────────────────────────────────────────────────
     async def start(self) -> None:
         self._started_at = time.time()
-        logger.info("worker started")
+        logger.info("worker started (concurrency=%s)", self._max_concurrency)
         while not self._shutdown.is_set():
+            await self._slots.acquire()
             try:
                 rid = await asyncio.wait_for(self._queue.get(), timeout=0.5)
             except asyncio.TimeoutError:
+                self._slots.release()
                 continue
-            await self._process_one(rid)
+            task = asyncio.create_task(
+                self._process_one(rid),
+                name=f"request-worker:{rid}",
+            )
+            self._tasks.add(task)
+            task.add_done_callback(self._on_task_done)
+
+    def _on_task_done(self, task: asyncio.Task[None]) -> None:
+        self._tasks.discard(task)
+        self._slots.release()
 
     def request_shutdown(self) -> None:
         self._shutdown.set()
 
     async def drain(self) -> None:
         # Wait for any in-flight task to finish.
-        while self._active > 0:
+        while self._active > 0 or self._tasks:
             await asyncio.sleep(0.05)
 
     @property

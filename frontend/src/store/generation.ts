@@ -5,6 +5,15 @@ import { useSettingsStore } from "./settings";
 
 type PollEntry = { requestId: number; timerId: ReturnType<typeof setTimeout> | null };
 
+export interface MockupBatchPair {
+  artwork_media_id: string;
+  artwork_node_id?: string;
+  artwork_short_id?: string;
+  mockup_media_id: string;
+  mockup_node_id?: string;
+  mockup_short_id?: string;
+}
+
 interface GenerationState {
   active: Record<string, PollEntry>;
   openDialog: { rfId: string | null; prompt: string };
@@ -36,6 +45,7 @@ interface GenerationState {
       // batchAsyncGenerate body so all are dispatched together.
       sourceMediaIds?: string[];
       variantCount?: number;
+      mockupPairs?: MockupBatchPair[];
       // Per-variant prompts. When provided, each variant uses its own
       // prompt — required for batch auto-prompt to keep poses distinct
       // across the 4 generated images.
@@ -152,6 +162,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     sourceMediaId?: string;
     sourceMediaIds?: string[];
     variantCount?: number;
+    mockupPairs?: MockupBatchPair[];
     prompts?: string[];
   }) {
     const projectId = await get().ensureProjectId();
@@ -184,7 +195,13 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
 
     // Optimistically update node — record variantCount so the placeholder
     // grid matches the eventual variant count even before generation finishes.
-    const variantCount = Math.max(1, Math.min(opts.variantCount ?? 1, 4));
+    const mockupPairs = Array.isArray(opts.mockupPairs)
+      ? opts.mockupPairs.filter((p) => p.artwork_media_id && p.mockup_media_id)
+      : [];
+    const requestedVariants = Math.max(1, Math.min(opts.variantCount ?? 1, 4));
+    const variantCount = mockupPairs.length > 0
+      ? mockupPairs.length * requestedVariants
+      : requestedVariants;
     useBoardStore.getState().updateNodeData(rfId, {
       status: "queued",
       prompt: opts.prompt,
@@ -281,7 +298,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
           aspect_ratio: opts.aspectRatio ?? "IMAGE_ASPECT_RATIO_LANDSCAPE",
           paygate_tier:
             opts.paygateTier ?? get().paygateTier ?? "PAYGATE_TIER_ONE",
-          variant_count: variantCount,
+          variant_count: mockupPairs.length > 0 ? requestedVariants : variantCount,
           // User's image model preference from the Settings panel.
           // Backend resolves the nickname → real Flow model identifier.
           image_model: useSettingsStore.getState().imageModel,
@@ -296,9 +313,11 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
           params.prompts = opts.prompts;
         }
         reqDto = await createRequest({
-          type: "gen_image",
+          type: mockupPairs.length > 0 ? "gen_mockup_batch" : "gen_image",
           node_id: isNaN(nodeDbId) ? undefined : nodeDbId,
-          params,
+          params: mockupPairs.length > 0
+            ? { ...params, mockup_pairs: mockupPairs }
+            : params,
         });
       }
     } catch (err) {
@@ -357,12 +376,14 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
             // missing on legacy / non-video results.
             const slotErrors =
               (req.result["slot_errors"] as (string | null)[] | undefined) ?? null;
+            const mockupSlots =
+              (req.result["mockup_slots"] as Array<Record<string, unknown>> | undefined) ?? undefined;
             // Stamp the model used onto the node so the detail panel can
             // show "Banana Pro" / "Quality" etc. — read from req.params
             // (what was dispatched). Tier-1 UI locks Lite + Quality so
             // we trust params directly without a backend fallback round-trip.
             const stampedImageModel =
-              req.type === "gen_image"
+              req.type === "gen_image" || req.type === "gen_mockup_batch"
                 ? (req.params["image_model"] as string | undefined)
                 : undefined;
             // For Veo (`gen_video`) the dispatched `video_quality` IS the
@@ -387,6 +408,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
               mediaId,
               mediaIds,
               slotErrors: slotErrors ?? undefined,
+              mockupSlots,
               aiBrief: undefined,
               aspectRatio: opts.aspectRatio,
               renderedAt: new Date().toISOString(),
@@ -416,6 +438,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
                   mediaId,
                   mediaIds,
                   slotErrors: slotErrors ?? null,
+                  mockupSlots: mockupSlots ?? null,
                   variantCount: d?.variantCount ?? mediaIds.length,
                   aiBrief: null,
                   aspectRatio: opts.aspectRatio,

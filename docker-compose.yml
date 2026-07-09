@@ -35,7 +35,7 @@ services:
       VITE_AGENT_PROXY_TARGET: http://agent:8101
       VITE_AGENT_PROXY_WS_TARGET: ws://agent:8101
     ports:
-      - "127.0.0.1:5173:5173"
+      - "5173:5173"
     depends_on:
       agent:
         condition: service_healthy

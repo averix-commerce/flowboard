@@ -4043,6 +4043,72 @@ button:disabled {
 
 /* ── Plan Preview Card ───────────────────────────────────────────────────── */
 
+.mockup-batch-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-high);
+  cursor: pointer;
+}
+
+.mockup-batch-toggle input {
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
+
+.mockup-batch-toggle__body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.mockup-batch-toggle__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.mockup-batch-toggle__meta {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.mockup-batch-map {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.mockup-batch-map__art,
+.mockup-batch-map__templates {
+  font-family: ui-monospace, monospace;
+  color: var(--text);
+}
+
+.mockup-batch-map__templates {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mockup-batch-map__arrow {
+  color: var(--accent);
+}
+
 .plan-preview-card {
   align-self: flex-start;
   max-width: 80%;

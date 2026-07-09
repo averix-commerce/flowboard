@@ -388,7 +388,8 @@ cd flowboard
 docker compose up --build
 ```
 
-Then open <http://localhost:5173>. The compose stack runs:
+Then open <http://localhost:5173>. Devices on the same LAN can use your
+machine IP, for example <http://192.168.1.12:5173>. The compose stack runs:
 
 - frontend: <http://localhost:5173>
 - agent API: <http://127.0.0.1:8101>
@@ -415,8 +416,9 @@ Notes:
   auto-prompt, or planner features. Without that, set
   `FLOWBOARD_PLANNER_BACKEND=mock docker compose up --build` for a smoke
   test, or configure API-key-backed providers in the app where supported.
-- Ports are bound to `127.0.0.1` in `docker-compose.yml` so the
-  unauthenticated extension bridge is not exposed to the network.
+- The frontend port is published on all interfaces so LAN devices can reach
+  it. The agent API and unauthenticated extension bridge remain bound to
+  `127.0.0.1` and are not exposed to the network.
 
 ### One-line setup (optional)
 
