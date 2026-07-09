@@ -870,6 +870,37 @@ async def test_check_async_workflow_mode_5xx_means_pending():
 
 
 @pytest.mark.asyncio
+async def test_check_async_workflow_mode_generic_invalid_argument_means_pending():
+    """Flow can return a generic INVALID_ARGUMENT from /v1/media while a
+    workflow-mode video is only scheduled. Keep polling unless the error has
+    structured details/reasons that identify a terminal rejection."""
+
+    class WorkflowClient(RecordingClient):
+        async def api_request(self, **kwargs):
+            self.api_calls.append(kwargs)
+            return {
+                "status": 400,
+                "data": {
+                    "error": {
+                        "code": 400,
+                        "message": "Request contains an invalid argument.",
+                        "status": "INVALID_ARGUMENT",
+                    }
+                },
+            }
+
+    c = WorkflowClient()
+    sdk = FlowSDK(client=c)  # type: ignore[arg-type]
+    out = await sdk.check_async(
+        ["wf-uuid"],
+        workflows=[{"name": "wf-uuid", "primary_media_id": "primary-vid-1"}],
+    )
+    assert out["operations"][0]["done"] is False
+    assert out["operations"][0]["error"] is None
+    assert out["operations"][0]["media_entries"] == []
+
+
+@pytest.mark.asyncio
 async def test_check_async_mixed_schemas_routes_correctly():
     """A single batch can mix OLD operations and NEW workflows (e.g. when a
     retry of a workflow op is re-dispatched as workflow). Operation names

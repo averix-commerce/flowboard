@@ -249,6 +249,30 @@ def _extract_inner_api_error(resp: Any) -> Optional[str]:
     return f"API_{status}"
 
 
+def _is_workflow_poll_pending_error(resp: dict[str, Any]) -> bool:
+    """True for Flow media-poll errors that mean "not ready yet".
+
+    Workflow-mode video submissions surface a primary media id immediately,
+    but `/v1/media/<id>` can return a generic INVALID_ARGUMENT while the
+    render is still scheduled. Treat only the detail-free generic form as
+    pending; structured 4xx errors with reasons should still fail terminally.
+    """
+    status_code = resp.get("status")
+    if status_code == 404 or (isinstance(status_code, int) and status_code >= 500):
+        return True
+    if status_code != 400:
+        return False
+    data = resp.get("data") if isinstance(resp.get("data"), dict) else {}
+    err = data.get("error") if isinstance(data.get("error"), dict) else {}
+    if err.get("status") != "INVALID_ARGUMENT":
+        return False
+    details = err.get("details")
+    if isinstance(details, list) and details:
+        return False
+    message = str(err.get("message") or "").lower()
+    return "invalid argument" in message
+
+
 def is_valid_project_id(project_id: str) -> bool:
     return bool(_PROJECT_ID_RE.fullmatch(project_id))
 
@@ -735,9 +759,7 @@ class FlowSDK:
                 )
                 continue
             status_code = resp.get("status")
-            if isinstance(status_code, int) and (
-                status_code == 404 or status_code >= 500
-            ):
+            if _is_workflow_poll_pending_error(resp):
                 ops_summary.append(
                     {"name": name, "done": False, "media_entries": [], "status": None, "error": None}
                 )

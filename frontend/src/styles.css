@@ -4366,6 +4366,84 @@ button:disabled {
 }
 
 /* Feature test row — 3 of these in the test list. */
+.openai-key-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.openai-key-form__label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+}
+.openai-key-form__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+.openai-key-form__input {
+  min-width: 0;
+  width: 100%;
+  padding: 7px 9px;
+  background: var(--panel-high);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.2;
+}
+.openai-key-form__input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(124, 92, 255, 0.25);
+}
+.openai-key-form__btn {
+  padding: 7px 11px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+}
+.openai-key-form__btn--primary {
+  background: rgba(124, 92, 255, 0.20);
+  border-color: rgba(124, 92, 255, 0.55);
+  color: #d4c4ff;
+}
+.openai-key-form__btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.openai-key-form__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.openai-key-form__hint {
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.openai-key-form__error {
+  font-size: 10px;
+  color: #ff8888;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+@media (max-width: 640px) {
+  .openai-key-form__row {
+    grid-template-columns: 1fr;
+  }
+  .openai-key-form__btn {
+    width: 100%;
+  }
+}
+
 .feature-test-list {
   display: flex;
   flex-direction: column;

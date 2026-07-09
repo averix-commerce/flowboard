@@ -10,6 +10,7 @@ services:
       FLOWBOARD_EXT_WS_PORT: "9223"
       FLOWBOARD_ALLOW_NON_LOOPBACK_WS: "1"
       FLOWBOARD_PLANNER_BACKEND: ${FLOWBOARD_PLANNER_BACKEND:-auto}
+      FLOWBOARD_SECRETS_PATH: /data/secrets.json
     ports:
       - "127.0.0.1:8101:8101"
       - "127.0.0.1:9223:9223"

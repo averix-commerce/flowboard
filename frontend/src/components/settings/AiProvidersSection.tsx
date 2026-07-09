@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getLlmConfig,
   getLlmProviders,
+  setLlmApiKey,
   setLlmConfig,
   testLlmProvider,
   type LLMConfig,
@@ -108,6 +109,9 @@ export function AiProvidersSection() {
   const [applying, setApplying] = useState(false);
   const [helpFor, setHelpFor] = useState<LLMProviderName | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [apiKeyDraft, setApiKeyDraft] = useState("");
+  const [apiKeySaving, setApiKeySaving] = useState(false);
+  const [apiKeyError, setApiKeyError] = useState<string | null>(null);
 
   const aliveRef = useRef(true);
   useEffect(() => {
@@ -175,6 +179,7 @@ export function AiProvidersSection() {
     // Switching the candidate provider invalidates any prior test
     // result — it was against a different target.
     setTest(INITIAL_TEST);
+    setApiKeyError(null);
   }
 
   async function runTest() {
@@ -213,6 +218,41 @@ export function AiProvidersSection() {
       );
     } finally {
       if (aliveRef.current) setApplying(false);
+    }
+  }
+
+  async function handleSaveOpenAiKey() {
+    const key = apiKeyDraft.trim();
+    if (!key || apiKeySaving) return;
+    setApiKeySaving(true);
+    setApiKeyError(null);
+    try {
+      await setLlmApiKey("openai", key);
+      setApiKeyDraft("");
+      setTest(INITIAL_TEST);
+      showToast("OpenAI API key saved.");
+      await refresh();
+    } catch (err) {
+      setApiKeyError(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (aliveRef.current) setApiKeySaving(false);
+    }
+  }
+
+  async function handleClearOpenAiKey() {
+    if (apiKeySaving) return;
+    setApiKeySaving(true);
+    setApiKeyError(null);
+    try {
+      await setLlmApiKey("openai", null);
+      setApiKeyDraft("");
+      setTest(INITIAL_TEST);
+      showToast("OpenAI API key cleared.");
+      await refresh();
+    } catch (err) {
+      setApiKeyError(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (aliveRef.current) setApiKeySaving(false);
     }
   }
 
@@ -314,10 +354,23 @@ export function AiProvidersSection() {
                 {labelOf(pending)} needs setup
               </div>
               <div className="selection-panel__setup-text">
-                {pendingProvider.lastError === "not_authenticated"
+                {pending === "openai"
+                  ? "Paste an OpenAI API key here, or use Setup help if you prefer Codex CLI OAuth."
+                  : pendingProvider.lastError === "not_authenticated"
                   ? "The CLI is installed but not signed in. Open Setup help for the login command."
                   : "Install the CLI from npm and sign in. Open Setup help for the exact commands."}
               </div>
+              {pending === "openai" && (
+                <OpenAiApiKeyForm
+                  value={apiKeyDraft}
+                  configured={pendingProvider.configured}
+                  saving={apiKeySaving}
+                  error={apiKeyError}
+                  onChange={setApiKeyDraft}
+                  onSave={handleSaveOpenAiKey}
+                  onClear={handleClearOpenAiKey}
+                />
+              )}
               <button
                 type="button"
                 className="selection-panel__setup-btn"
@@ -343,6 +396,17 @@ export function AiProvidersSection() {
                 result={test}
                 onTest={runTest}
               />
+              {pending === "openai" && (
+                <OpenAiApiKeyForm
+                  value={apiKeyDraft}
+                  configured={pendingProvider.configured}
+                  saving={apiKeySaving}
+                  error={apiKeyError}
+                  onChange={setApiKeyDraft}
+                  onSave={handleSaveOpenAiKey}
+                  onClear={handleClearOpenAiKey}
+                />
+              )}
               <div className="selection-panel__actions">
                 <button
                   type="button"
@@ -382,6 +446,72 @@ export function AiProvidersSection() {
         open={helpFor !== null}
         onClose={() => setHelpFor(null)}
       />
+    </div>
+  );
+}
+
+interface OpenAiApiKeyFormProps {
+  value: string;
+  configured: boolean;
+  saving: boolean;
+  error: string | null;
+  onChange(value: string): void;
+  onSave(): void;
+  onClear(): void;
+}
+
+function OpenAiApiKeyForm({
+  value,
+  configured,
+  saving,
+  error,
+  onChange,
+  onSave,
+  onClear,
+}: OpenAiApiKeyFormProps) {
+  const canSave = value.trim().length > 0 && !saving;
+
+  return (
+    <div className="openai-key-form">
+      <label className="openai-key-form__label" htmlFor="openai-api-key">
+        OpenAI API key
+      </label>
+      <div className="openai-key-form__row">
+        <input
+          id="openai-api-key"
+          className="openai-key-form__input"
+          type="password"
+          value={value}
+          placeholder={configured ? "Key saved - paste a new key to replace" : "sk-..."}
+          autoComplete="off"
+          spellCheck={false}
+          onChange={(e) => onChange(e.target.value)}
+        />
+        <button
+          type="button"
+          className="openai-key-form__btn openai-key-form__btn--primary"
+          onClick={onSave}
+          disabled={!canSave}
+        >
+          {saving ? "Saving..." : configured ? "Replace" : "Save"}
+        </button>
+        {configured && (
+          <button
+            type="button"
+            className="openai-key-form__btn"
+            onClick={onClear}
+            disabled={saving}
+          >
+            Clear
+          </button>
+        )}
+      </div>
+      <div className="openai-key-form__hint">
+        {configured
+          ? "A key is saved locally. Run Test to verify it works."
+          : "Stored locally in the agent secrets file and used only for OpenAI requests."}
+      </div>
+      {error && <div className="openai-key-form__error">{error}</div>}
     </div>
   );
 }
